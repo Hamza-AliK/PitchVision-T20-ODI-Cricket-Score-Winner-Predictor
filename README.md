@@ -39,7 +39,7 @@ PitchVision-T20-ODI-Cricket-Score-Winner-Predictor/
 ├── preprocessing.py            # Pandas cleaning, feature building, date splitting, NumPy matrix
 ├── text_processor.py           # NLP cleaning, stop-word removal, TF-IDF, Cosine similarity
 ├── models.py                   # Abstract BasePredictor, ScorePredictor, WinnerPredictor
-├── visualiser.py               # Matplotlib & Seaborn visualization pipeline
+├── visualiser.py               # Matplotlib visualization pipeline
 ├── main.py                     # Interactive Console Menu (Application Entry Point)
 ├── requirements.txt            # Project dependencies
 └── README.md                   # Project documentation
