@@ -18,7 +18,7 @@
 | Name | Roll Number | Section | Role & Modules Owned | Work Share |
 | :--- | :--- | :--- | :--- | :--- |
 | **Hamza Ali Khatri** *(Leader)* | 25K-0004 | BAI-3A | `data_manager.py`, `exceptions.py`, `main.py` (ConsoleMenu), repository setup, caching, offline fallback | **34%** |
-| **Abdul Rehman** | 25K-0062 | BAI-3A | `preprocessing.py` (Pandas cleaning, feature engineering, NumPy over matrix), `visualiser.py` (Matplotlib/Seaborn charts) | **33%** |
+| **Abdul Rehman** | 25K-0062 | BAI-3A | `preprocessing.py` (Pandas cleaning, feature engineering, NumPy over matrix), `visualiser.py` (Matplotlib charts) | **33%** |
 | **Syed M. Abbas** | 25K-0023 | BAI-3A | `models.py` (BasePredictor, ScorePredictor, WinnerPredictor, polymorphism), `text_processor.py` (Track A NLP, TF-IDF, similarity) | **33%** |
 
 ---
