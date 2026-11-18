@@ -85,3 +85,78 @@ def parse_matches_zip(zip_path, fmt):
     if not rows:
         raise DataUnavailableError(f"No usable matches found in {zip_path}.")
     return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------
+# 2. Rolling team/venue state (the only place features are computed, so
+#    training and live prediction use identical logic)
+# --------------------------------------------------------------------------
+class _State:
+    def __init__(self, window=10, elo_start=1500.0, k=24.0, prior=3.0):
+        self.window, self.elo_start, self.k, self.prior = window, elo_start, k, prior
+        self.elo = defaultdict(lambda: elo_start)
+        self.rr_for = defaultdict(lambda: deque(maxlen=window))
+        self.rr_against = defaultdict(lambda: deque(maxlen=window))
+        self.results = defaultdict(lambda: deque(maxlen=window))
+        self.played = defaultdict(int)
+        self.v_n = defaultdict(int)
+        self.v_sum = defaultdict(float)
+        self.v_win = defaultdict(float)
+        self.g_n, self.g_sum, self.g_win = 0, 0.0, 0.0
+
+    @staticmethod
+    def _mean(values):
+        return float(np.mean(values)) if len(values) else np.nan
+
+    def features(self, bat, bowl, venue, toss_winner, toss_decision, year):
+        if self.g_n:
+            g_avg, g_win = self.g_sum / self.g_n, self.g_win / self.g_n
+            n = self.v_n[venue]
+            v_avg = (self.v_sum[venue] + self.prior * g_avg) / (n + self.prior)
+            v_win = (self.v_win[venue] + self.prior * g_win) / (n + self.prior)
+        else:
+            v_avg = v_win = np.nan
+        return {
+            "elo_bat": self.elo[bat], "elo_bowl": self.elo[bowl],
+            "elo_diff": self.elo[bat] - self.elo[bowl],
+            "bat_form_for": self._mean(self.rr_for[bat]),
+            "bat_form_against": self._mean(self.rr_against[bat]),
+            "bowl_form_for": self._mean(self.rr_for[bowl]),
+            "bowl_form_against": self._mean(self.rr_against[bowl]),
+            "bat_win_rate": self._mean(self.results[bat]),
+            "bowl_win_rate": self._mean(self.results[bowl]),
+            "bat_matches": self.played[bat], "bowl_matches": self.played[bowl],
+            "venue_avg_first": v_avg, "venue_bat_first_win": v_win,
+            "toss_won_by_bat_team": int(toss_winner == bat),
+            "toss_chose_bat": int(toss_decision == "bat"),
+            "year": year,
+        }
+
+    def update(self, m):
+        bat, bowl, venue = m["bat_team"], m["bowl_team"], m["venue"]
+        for runs, balls, batting, bowling in (
+            (m["first_innings_runs"], m["first_innings_balls"], bat, bowl),
+            (m["second_innings_runs"], m["second_innings_balls"], bowl, bat),
+        ):
+            if balls > 0:
+                rate = runs / (balls / 6.0)       # runs per over, robust to short innings
+                self.rr_for[batting].append(rate)
+                self.rr_against[bowling].append(rate)
+
+        won = m["bat_first_won"]
+        won = 0.5 if pd.isna(won) else float(won)  # tie / no result
+        expected = 1.0 / (1.0 + 10 ** ((self.elo[bowl] - self.elo[bat]) / 400.0))
+        delta = self.k * (won - expected)
+        self.elo[bat] += delta
+        self.elo[bowl] -= delta
+        self.results[bat].append(won)
+        self.results[bowl].append(1.0 - won)
+        self.played[bat] += 1
+        self.played[bowl] += 1
+
+        self.v_n[venue] += 1
+        self.v_sum[venue] += m["first_innings_runs"]
+        self.v_win[venue] += won
+        self.g_n += 1
+        self.g_sum += m["first_innings_runs"]
+        self.g_win += won
