@@ -160,3 +160,61 @@ class _State:
         self.g_n += 1
         self.g_sum += m["first_innings_runs"]
         self.g_win += won
+
+
+# --------------------------------------------------------------------------
+# 3. Public Preprocessor
+# --------------------------------------------------------------------------
+class Preprocessor:
+    """Cleans the match table and builds pre-match features without leakage."""
+
+    def __init__(self, matches):
+        self.df = matches.copy()
+        self._state = None
+
+    def clean(self):
+        required = ["venue", "bat_team", "bowl_team", "toss_winner", "toss_decision"]
+        self.df = self.df.dropna(subset=required).copy()
+        self.df["date"] = pd.to_datetime(self.df["date"])
+        self.df = self.df.sort_values(["date", "match_id"]).reset_index(drop=True)
+        return self.df
+
+    def build_features(self):
+        """Each row's features use only matches played BEFORE it."""
+        state = _State()
+        rows = []
+        for m in self.df.to_dict("records"):
+            rows.append(state.features(m["bat_team"], m["bowl_team"], m["venue"],
+                                       m["toss_winner"], m["toss_decision"], m["date"].year))
+            state.update(m)
+        self._state = state
+        self.df = pd.concat([self.df, pd.DataFrame(rows)], axis=1)
+        return self.df
+
+    def fixture_features(self, bat, bowl, venue, toss_winner, toss_decision, year=None):
+        """Features for an upcoming match, from the state after the latest played match."""
+        if self._state is None:
+            raise RuntimeError("Call build_features() first.")
+        year = year or int(self.df["date"].max().year)
+        return pd.DataFrame([self._state.features(bat, bowl, venue, toss_winner, toss_decision, year)])[FEATURES]
+
+    def training_frame(self, min_history=5):
+        """Rows where both teams already have some history."""
+        d = self.df
+        return d[(d["bat_matches"] >= min_history) & (d["bowl_matches"] >= min_history)]
+
+    @staticmethod
+    def split_by_date(df, test_frac=0.2):
+        """Chronological split: train on the past, test on the most recent matches."""
+        df = df.sort_values("date")
+        cut = int(len(df) * (1 - test_frac))
+        return df.iloc[:cut], df.iloc[cut:]
+
+    def known_teams(self):
+        return sorted(self._state.played)
+
+    def known_venues(self):
+        return sorted(self._state.v_n)
+
+    def elo_table(self):
+        return pd.Series(dict(self._state.elo)).sort_values(ascending=False)
