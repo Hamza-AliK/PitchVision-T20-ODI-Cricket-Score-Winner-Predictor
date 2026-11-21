@@ -31,3 +31,22 @@ class Visualiser:
         ax.plot(lims, lims, "r--", label="Perfect prediction")
         ax.set(title="3. Actual vs Predicted (test set)", xlabel="Actual", ylabel="Predicted")
         ax.legend()
+
+        ax = axs[1, 0]
+        ax.bar(list(model_mae), list(model_mae.values()), color=["#bbbbbb", "#999999", "#2a9d8f"][:len(model_mae)])
+        ax.set(title="4. Score Error (MAE, lower is better)", ylabel="Runs")
+        ax.tick_params(axis="x", labelrotation=15)
+
+        ax = axs[1, 1]
+        counts = matches["toss_decision"].value_counts()
+        ax.pie(counts.values, labels=counts.index, autopct="%1.1f%%", startangle=140,
+               wedgeprops={"edgecolor": "black"})
+        ax.set_title("5. Toss Decision Breakdown")
+
+        ax = axs[1, 2]
+        top = elo.head(10)[::-1]
+        ax.barh(top.index, top.values, color="#e76f51")
+        ax.set(title="6. Top 10 Teams by Elo", xlabel="Elo")
+
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.show()
