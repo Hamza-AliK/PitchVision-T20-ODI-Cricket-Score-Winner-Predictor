@@ -1,1 +1,179 @@
+import difflib
+import os
+
+import pandas as pd
+
+from data_manager import DataManager
+from exceptions import DataUnavailableError
+from models import ScorePredictor, WinnerPredictor
+from preprocessing import (FEATURES, SCORE_TARGET, WINNER_TARGET, Preprocessor,
+                           parse_matches_zip)
+from text_processor import TextProcessor
+from visualiser import Visualiser
+
+
+class ConsoleMenu:
+    """Interactive console app: real Cricsheet data -> features -> trained models."""
+
+    def __init__(self):
+        self.dm = DataManager()
+        self.visualiser = Visualiser()
+        self.text_processor = TextProcessor()
+        self.score_predictor = ScorePredictor()
+        self.winner_predictor = WinnerPredictor()
+        self.pre = None
+        self.fmt = None
+        self.train = self.test = None
+        self.trained = False
+
+    # ---------------------------------------------------------------- helpers
+    def _need_data(self):
+        if self.pre is None:
+            raise DataUnavailableError("Please load data first (option 1).")
+
+    def _ensure_trained(self):
+        self._need_data()
+        if not self.trained:
+            self._train_all(verbose=False)
+
+    def _train_all(self, verbose=True):
+        frame = self.pre.training_frame()
+        self.train, self.test = Preprocessor.split_by_date(frame)
+        tasks = [(self.score_predictor, SCORE_TARGET), (self.winner_predictor, WINNER_TARGET)]
+        for predictor, target in tasks:          # same loop, different model types (polymorphism)
+            tr = self.train.dropna(subset=[target])
+            te = self.test.dropna(subset=[target])
+            predictor.fit(tr[FEATURES], tr[target])
+            if verbose:
+                print(f"\n{predictor.name}  (chosen on validation: {predictor.selected})")
+                for k, v in predictor.evaluate(te[FEATURES], te[target]).items():
+                    print(f"  {k}: {v:.3f}" if isinstance(v, float) else f"  {k}: {v}")
+        self.trained = True
+        if verbose:
+            print(f"\nTrained on {len(self.train)} matches up to {self.train['date'].max().date()}, "
+                  f"tested on {len(self.test)} later matches.")
+
+    @staticmethod
+    def _pick(prompt, options, allow_new=False):
+        raw = input(prompt).strip()
+        if raw in options:
+            return raw
+        partial = [o for o in options if raw and raw.lower() in o.lower()]
+        if len(partial) == 1:                      # e.g. "Wankhede" -> "Wankhede Stadium, Mumbai"
+            return partial[0]
+        close = difflib.get_close_matches(raw, options, n=1, cutoff=0.6)
+        if close:
+            if input(f"Did you mean '{close[0]}'? (y/n): ").strip().lower().startswith("y"):
+                return close[0]
+        if allow_new:
+            print("  (unknown name, using league-wide averages for it)")
+            return raw
+        raise ValueError(f"'{raw}' not found. Known examples: {', '.join(options[:8])}...")
+
+    def _ask_fixture(self):
+        teams = self.pre.known_teams()
+        bat = self._pick("Team batting first: ", teams)
+        bowl = self._pick("Team bowling first: ", teams)
+        venue = self._pick("Venue: ", self.pre.known_venues(), allow_new=True)
+        toss_winner = self._pick(f"Toss winner ({bat} / {bowl}): ", [bat, bowl])
+        decision = input("Toss decision (bat/field): ").strip().lower()
+        if decision not in ("bat", "field"):
+            raise ValueError("Toss decision must be 'bat' or 'field'.")
+        return self.pre.fixture_features(bat, bowl, venue, toss_winner, decision), bat, bowl
+
+    # ---------------------------------------------------------------- actions
+    def load_data(self):
+        fmt = input("Enter format (t20/odi): ").strip().lower()
+        csv_path = self.dm.processed_path(fmt)
+        if os.path.exists(csv_path):
+            print(f"Using cached match table {csv_path}")
+            matches = pd.read_csv(csv_path)
+        else:
+            zip_path = self.dm.fetch_zip(fmt)
+            print(f"Parsing {zip_path} (this can take a minute)...")
+            matches = parse_matches_zip(zip_path, fmt)
+            matches.to_csv(csv_path, index=False)
+        self.pre = Preprocessor(matches)
+        self.pre.clean()
+        self.pre.build_features()
+        self.fmt, self.trained = fmt, False
+        print(f"Loaded {len(self.pre.df)} {fmt.upper()} matches "
+              f"({self.pre.df['date'].min().date()} to {self.pre.df['date'].max().date()}).")
+
+    def predict_score(self):
+        self._ensure_trained()
+        X, bat, bowl = self._ask_fixture()
+        point = self.score_predictor.predict(X)[0]
+        lo, hi = self.score_predictor.predict_interval(X)
+        print(f"\n{bat} predicted first-innings total: {point:.0f} runs "
+              f"(likely range {lo[0]:.0f} to {hi[0]:.0f})")
+
+    def predict_winner(self):
+        self._ensure_trained()
+        X, bat, bowl = self._ask_fixture()
+        p = float(self.winner_predictor.predict_proba(X)[0])
+        winner, prob = (bat, p) if p >= 0.5 else (bowl, 1 - p)
+        print(f"\nPredicted winner: {winner} ({prob:.1%})  "
+              f"[{bat} {p:.1%} / {bowl} {1 - p:.1%}]")
+
+    def similar_venues(self):
+        self._need_data()
+        top = self.pre.df["venue"].value_counts().head(15).index.tolist()
+        names, texts = [], []
+        for v in top:
+            t = self.dm.fetch_venue_text(v)
+            if t:
+                names.append(v)
+                texts.append(t)
+        if len(names) < 3:
+            print("Could not fetch enough venue descriptions (offline or no Wikipedia pages).")
+            return
+        self.text_processor.fit_tfidf(names, texts)
+        target = self._pick("Ground to compare: ", names)
+        for name, score in self.text_processor.similar_venues(target):
+            print(f"  {name}: similarity {score:.2f}")
+
+    def show_visuals(self):
+        self._ensure_trained()
+        te = self.test.dropna(subset=[SCORE_TARGET])
+        info = self.score_predictor.evaluate(te[FEATURES], te[SCORE_TARGET])
+        self.visualiser.show_dashboard(
+            matches=self.pre.df,
+            actual=te[SCORE_TARGET].tolist(),
+            predicted=self.score_predictor.predict(te[FEATURES]).tolist(),
+            model_mae={"Train mean": info["baseline MAE (always train mean)"],
+                       "Venue avg": info["baseline MAE (venue average)"],
+                       "Model": info["MAE"]},
+            elo=self.pre.elo_table(),
+        )
+
+    # ------------------------------------------------------------------- loop
+    def run(self):
+        print("=" * 50)
+        print("      PitchVision: T20 / ODI Cricket Predictor")
+        print("=" * 50)
+        actions = {
+            "1": self.load_data, "2": self.predict_score, "3": self.predict_winner,
+            "4": self.similar_venues, "5": lambda: (self._need_data(), self._train_all()),
+            "6": self.show_visuals,
+        }
+        while True:
+            print("\nMenu:\n1. Load & Preprocess Data\n2. Predict First-Innings Score\n3. Predict Match Winner"
+                  "\n4. Find Similar Venues (NLP)\n5. Train & Evaluate Models\n6. Generate Visualisations\n7. Exit")
+            choice = input("Enter your choice (1-7): ").strip()
+            if choice == "7":
+                print("Goodbye!")
+                break
+            try:
+                action = actions.get(choice)
+                if action is None:
+                    print("Invalid choice. Please enter a number between 1 and 7.")
+                else:
+                    action()
+            except (DataUnavailableError, ValueError) as e:
+                print(f"Error: {e}")
+
+
+if __name__ == "__main__":
+    ConsoleMenu().run()
 
