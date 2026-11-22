@@ -147,6 +147,23 @@ class ConsoleMenu:
             elo=self.pre.elo_table(),
         )
 
+    def export_names(self):
+        """Write every team and venue name found in the loaded data to names.txt."""
+        self._need_data()
+        df = self.pre.df
+        teams = pd.concat([df["bat_team"], df["bowl_team"]]).value_counts()
+        venues = df["venue"].value_counts()
+        path = f"names_{self.fmt}.txt"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"# {self.fmt.upper()} names exactly as they appear in the data. Copy-paste these when testing.\n")
+            f.write(f"\n## TEAMS ({len(teams)})\n")
+            for name in sorted(teams.index):
+                f.write(f"{name}  [{teams[name]} matches]\n")
+            f.write(f"\n## VENUES ({len(venues)})\n")
+            for name in sorted(venues.index):
+                f.write(f"{name}  [{venues[name]} matches]\n")
+        print(f"Wrote {len(teams)} teams and {len(venues)} venues to {path}")
+
     # ------------------------------------------------------------------- loop
     def run(self):
         print("=" * 50)
@@ -155,19 +172,19 @@ class ConsoleMenu:
         actions = {
             "1": self.load_data, "2": self.predict_score, "3": self.predict_winner,
             "4": self.similar_venues, "5": lambda: (self._need_data(), self._train_all()),
-            "6": self.show_visuals,
+            "6": self.show_visuals, "7": self.export_names,
         }
         while True:
             print("\nMenu:\n1. Load & Preprocess Data\n2. Predict First-Innings Score\n3. Predict Match Winner"
-                  "\n4. Find Similar Venues (NLP)\n5. Train & Evaluate Models\n6. Generate Visualisations\n7. Exit")
-            choice = input("Enter your choice (1-7): ").strip()
-            if choice == "7":
+                  "\n4. Find Similar Venues (NLP)\n5. Train & Evaluate Models\n6. Generate Visualisations\n7. Export Team & Venue Names\n8. Exit")
+            choice = input("Enter your choice (1-8): ").strip()
+            if choice == "8":
                 print("Goodbye!")
                 break
             try:
                 action = actions.get(choice)
                 if action is None:
-                    print("Invalid choice. Please enter a number between 1 and 7.")
+                    print("Invalid choice. Please enter a number between 1 and 8.")
                 else:
                     action()
             except (DataUnavailableError, ValueError) as e:
@@ -176,4 +193,3 @@ class ConsoleMenu:
 
 if __name__ == "__main__":
     ConsoleMenu().run()
-
