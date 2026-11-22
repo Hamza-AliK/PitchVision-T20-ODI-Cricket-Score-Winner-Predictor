@@ -3,6 +3,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 class TextProcessor:
+    """Cleans venue descriptions and builds TF-IDF features for Track A NLP."""
     def __init__(self):
         self.stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with'}
         self.vectorizer = TfidfVectorizer()
