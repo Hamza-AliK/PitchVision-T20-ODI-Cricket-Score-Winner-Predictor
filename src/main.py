@@ -9,7 +9,7 @@ from models import ScorePredictor, WinnerPredictor
 from preprocessing import (FEATURES, SCORE_TARGET, WINNER_TARGET, Preprocessor,
                            parse_matches_zip)
 from text_processor import TextProcessor
-from visualiser import Visualiser
+from Visualiser import Visualiser
 
 
 class ConsoleMenu:
